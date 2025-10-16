@@ -24,8 +24,8 @@ Berikut adalah langkah-langkah untuk menjalankan proyek ini di komputermu sendir
 
 1.  **Clone repositori ini:**
     ```bash
-    git clone [https://github.com/NAMA_USER_KAMU/NAMA_REPO_KAMU.git](https://github.com/NAMA_USER_KAMU/NAMA_REPO_KAMU.git)
-    cd NAMA_REPO_KAMU
+    git clone [https://github.com/VonMatilda07/django-kasir-pos.git](https://github.com/VonMatilda07/django-kasir-pos.git)
+    cd django-kasir-pos
     ```
 
 2.  **Buat dan aktifkan virtual environment:**
