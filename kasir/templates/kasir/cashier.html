@@ -16,7 +16,7 @@
                     <div>
                         <span class="me-2">Halo, <strong>{{ user.username }}</strong>!</span>
                         {% if perms.kasir.view_transaction %}
-                            <a href="{% url 'sales_report' %}" class="btn btn-info">Lihat Laporan</a>
+                           <a href="{% url 'dashboard' %}" class="btn btn-warning">Dashboard</a> <a href="{% url 'sales_report' %}" class="btn btn-info">Lihat Laporan</a>
                         {% endif %}
                         <form method="post" action="{% url 'logout' %}" class="d-inline">
                             {% csrf_token %}
