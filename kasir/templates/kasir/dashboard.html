@@ -14,11 +14,25 @@
         </div>
         <hr>
 
+        <form method="GET" action="{% url 'dashboard' %}" class="row g-3 align-items-center mb-4 bg-light p-3 rounded border">
+            <div class="col-auto">
+                <label for="start_date" class="form-label fw-bold">Dari Tanggal</label>
+                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-auto">
+                <label for="end_date" class="form-label fw-bold">Sampai Tanggal</label>
+                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-auto align-self-end">
+                <button type="submit" class="btn btn-primary">Filter</button>
+            </div>
+        </form>
+        
         <div class="row mb-4">
             <div class="col-md-4">
                 <div class="card text-white bg-primary">
                     <div class="card-body">
-                        <h5 class="card-title">Omzet Hari Ini</h5>
+                        <h5 class="card-title">Omzet (Rentang Terpilih)</h5>
                         <p class="card-text fs-4">Rp {{ total_sales_today|floatformat:0 }}</p>
                     </div>
                 </div>
@@ -45,7 +59,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Penjualan per Jam (Hari Ini)</h5>
+                        <h5 class="card-title">Grafik Penjualan</h5>
                         <canvas id="salesPerHourChart"></canvas>
                     </div>
                 </div>
@@ -56,33 +70,46 @@
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
-                        <h5>Produk Terlaris (30 Hari Terakhir)</h5>
+                        <h5>Produk Terlaris (Rentang Terpilih)</h5>
                     </div>
-                    <ul class="list-group list-group-flush" id="top-products-list">
-                        </ul>
+                    <ul class="list-group list-group-flush" id="top-products-list"></ul>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
-                        <h5>Produk Kurang Laku (30 Hari Terakhir)</h5>
+                        <h5>Produk Kurang Laku (Rentang Terpilih)</h5>
                     </div>
-                    <ul class="list-group list-group-flush" id="bottom-products-list">
-                        </ul>
+                    <ul class="list-group list-group-flush" id="bottom-products-list"></ul>
                 </div>
             </div>
         </div>
-        </div>
+    </div>
 
     <script>
-        // Fungsi untuk grafik (tidak berubah)
+        const startDate = "{{ start_date }}";
+        const endDate = "{{ end_date }}";
+
+        // --- PERUBAHAN: Menggunakan URL API yang baru ---
+        const salesApiUrl = `{% url 'sales_data_api' %}?start_date=${startDate}&end_date=${endDate}`;
+        const productsApiUrl = `{% url 'top_products_api' %}?start_date=${startDate}&end_date=${endDate}`;
+
+        // --- PERUBAHAN: Fungsi renderSalesChart sekarang lebih pintar ---
         async function renderSalesChart() {
             try {
-                const response = await fetch("{% url 'sales_per_hour_api' %}");
+                const response = await fetch(salesApiUrl);
                 const chartData = await response.json();
                 const ctx = document.getElementById('salesPerHourChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'bar',
+                
+                if (window.mySalesChart) {
+                    window.mySalesChart.destroy();
+                }
+
+                // Update judul grafik secara dinamis dari data API
+                document.querySelector('#salesPerHourChart').closest('.card-body').querySelector('.card-title').innerText = chartData.title;
+
+                window.mySalesChart = new Chart(ctx, {
+                    type: chartData.type, // 'bar'
                     data: {
                         labels: chartData.labels,
                         datasets: [{
@@ -93,26 +120,48 @@
                             borderWidth: 1
                         }]
                     },
-                    options: { scales: { y: { beginAtZero: true } } }
+                    options: { 
+                        scales: { 
+                            y: { 
+                                beginAtZero: true,
+                                ticks: { // Format Rupiah di sumbu Y
+                                    callback: function(value) {
+                                        return 'Rp ' + value.toLocaleString('id-ID');
+                                    }
+                                }
+                            } 
+                        },
+                        plugins: { // Format Rupiah di tooltip saat hover
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) { label += ': '; }
+                                        if (context.parsed.y !== null) {
+                                            label += 'Rp ' + context.parsed.y.toLocaleString('id-ID');
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 });
             } catch (error) {
                 console.error('Gagal memuat data grafik:', error);
             }
         }
 
-        // --- FUNGSI BARU UNTUK STATISTIK PRODUK ---
+        // Fungsi loadProductStats (tidak ada perubahan)
         async function loadProductStats() {
             try {
-                const response = await fetch("{% url 'top_products_api' %}");
+                const response = await fetch(productsApiUrl);
                 const productData = await response.json();
-
                 const topList = document.getElementById('top-products-list');
                 const bottomList = document.getElementById('bottom-products-list');
-
                 topList.innerHTML = '';
                 bottomList.innerHTML = '';
 
-                // Isi list produk terlaris
                 productData.top_products.forEach(product => {
                     const li = document.createElement('li');
                     li.className = 'list-group-item d-flex justify-content-between align-items-center';
@@ -120,21 +169,17 @@
                     topList.appendChild(li);
                 });
 
-                // Isi list produk kurang laku
                 productData.bottom_products.forEach(product => {
                     const li = document.createElement('li');
                     li.className = 'list-group-item d-flex justify-content-between align-items-center';
                     li.innerHTML = `${product.product__name} <span class="badge bg-danger rounded-pill">${product.total_sold} terjual</span>`;
                     bottomList.appendChild(li);
                 });
-
             } catch (error) {
                 console.error('Gagal memuat statistik produk:', error);
             }
         }
 
-        // --- GANTI EVENT LISTENER LAMA DENGAN YANG INI ---
-        // Panggil kedua fungsi saat halaman selesai dimuat
         document.addEventListener('DOMContentLoaded', () => {
             renderSalesChart();
             loadProductStats();

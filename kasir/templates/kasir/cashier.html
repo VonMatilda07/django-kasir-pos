@@ -16,7 +16,8 @@
                     <div>
                         <span class="me-2">Halo, <strong>{{ user.username }}</strong>!</span>
                         {% if perms.kasir.view_transaction %}
-                           <a href="{% url 'dashboard' %}" class="btn btn-warning">Dashboard</a> <a href="{% url 'sales_report' %}" class="btn btn-info">Lihat Laporan</a>
+                           <a href="{% url 'dashboard' %}" class="btn btn-warning">Dashboard</a>
+                           <a href="{% url 'sales_report' %}" class="btn btn-info">Lihat Laporan</a>
                         {% endif %}
                         <form method="post" action="{% url 'logout' %}" class="d-inline">
                             {% csrf_token %}
@@ -28,14 +29,33 @@
                 <div class="row" id="product-list">
                     {% for product in products %}
                     <div class="col-md-4 mb-3">
-                        <div class="card h-100">
+                        <div class="card h-100 {% if product.stock == 0 %} bg-light {% endif %}" data-product-id="{{ product.id }}">
                             <div class="card-body d-flex flex-column">
                                 <h5 class="card-title">{{ product.name }}</h5>
                                 <p class="card-text">Rp {{ product.price|floatformat:0 }}</p>
-                                <button class="btn btn-primary w-100 mt-auto add-to-cart-btn" data-product-id="{{ product.id }}">Tambah</button>
+                                
+                                {% if product.stock > 5 %}
+                                    <p class="card-text stock-text"><small class="text-muted">Sisa Stok: {{ product.stock }}</small></p>
+                                {% elif product.stock > 0 %}
+                                    <p class="card-text stock-text"><strong class="text-warning">Stok Menipis: {{ product.stock }}</strong></p>
+                                {% else %}
+                                    <p class="card-text stock-text"><strong class="text-danger">Stok Habis</strong></p>
+                                {% endif %}
+                                
+                                <button 
+                                    class="btn btn-primary w-100 mt-auto add-to-cart-btn" 
+                                    data-product-id="{{ product.id }}" 
+                                    {% if product.stock == 0 %} disabled {% endif %}>
+                                    
+                                    {% if product.stock > 0 %}
+                                        Tambah
+                                    {% else %}
+                                        Habis
+                                    {% endif %}
+                                </button>
                             </div>
                         </div>
-                    </div>
+                        </div>
                     {% endfor %}
                 </div>
             </div>
@@ -48,7 +68,7 @@
                 </ul>
                 <hr>
                 <h4>Total: <span id="cart-total">Rp 0</span></h4>
-                <button class="btn btn-success w-100 mt-3" data-bs-toggle="modal" data-bs-target="#paymentModal">Bayar</button>
+                <button class="btn btn-success w-100 mt-3" data-bs-toggle="modal" data-bs-target="#paymentModal" id="pay-button">Bayar</button>
             </div>
         </div>
     </div>
@@ -66,6 +86,7 @@
               <label for="cash-received" class="form-label">Jumlah Uang Tunai (Rp)</label>
               <input type="number" class="form-control" id="cash-received" placeholder="Contoh: 50000" required>
             </div>
+            <div id="payment-change" class="mt-2"></div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
@@ -78,93 +99,243 @@
     {{ products_json|json_script:"products-data" }}
 
     <script>
-        const productsData = JSON.parse(document.getElementById('products-data').textContent);
-        let cart = {}; 
-        const addToCartButtons = document.querySelectorAll('.add-to-cart-btn');
+      // JavaScript untuk add-to-cart, update stok di UI, dan checkout
+      const productsData = JSON.parse(document.getElementById('products-data').textContent);
+      // Buat lookup by id untuk kemudahan
+      const productsById = {};
+      productsData.forEach(p => { productsById[p.id] = {...p}; }); // salinan agar bisa diubah di client
 
-        function addToCart(productId) {
-            if (cart[productId]) { cart[productId].quantity++; }
-            else {
-                const product = productsData.find(p => p.id == productId);
-                cart[productId] = { name: product.name, price: parseFloat(product.price), quantity: 1 };
+      let cart = {}; // format: { productId: { id, name, price, quantity } }
+
+      // Inisialisasi tombol
+      function initAddToCartButtons() {
+        const buttons = document.querySelectorAll('.add-to-cart-btn');
+        buttons.forEach(btn => {
+          btn.addEventListener('click', () => {
+            const pid = btn.dataset.productId;
+            addToCart(pid);
+          });
+        });
+      }
+
+      function addToCart(productId) {
+        const product = productsById[productId];
+        if (!product) {
+          alert('Produk tidak ditemukan');
+          return;
+        }
+        if (product.stock <= 0) {
+          alert('Stok produk habis');
+          updateProductCardUI(productId);
+          return;
+        }
+
+        // Tambah ke cart
+        if (cart[productId]) {
+          cart[productId].quantity += 1;
+        } else {
+          cart[productId] = {
+            id: product.id,
+            name: product.name,
+            price: parseFloat(product.price),
+            quantity: 1
+          };
+        }
+
+        // Kurangi stok lokal dan update UI
+        product.stock -= 1;
+        updateProductCardUI(productId);
+        updateCartView();
+      }
+
+      function updateProductCardUI(productId) {
+        const card = document.querySelector(`.card[data-product-id="${productId}"]`);
+        const product = productsById[productId];
+        if (!card || !product) return;
+
+        // update stock-text
+        const stockTextEl = card.querySelector('.stock-text');
+        if (product.stock > 5) {
+          stockTextEl.innerHTML = `<small class="text-muted">Sisa Stok: ${product.stock}</small>`;
+        } else if (product.stock > 0) {
+          stockTextEl.innerHTML = `<strong class="text-warning">Stok Menipis: ${product.stock}</strong>`;
+        } else {
+          stockTextEl.innerHTML = `<strong class="text-danger">Stok Habis</strong>`;
+        }
+
+        // disable button if no stock
+        const btn = card.querySelector('.add-to-cart-btn');
+        if (product.stock <= 0) {
+          btn.setAttribute('disabled', 'disabled');
+          btn.innerText = 'Habis';
+          card.classList.add('bg-light');
+        } else {
+          btn.removeAttribute('disabled');
+          btn.innerText = 'Tambah';
+          card.classList.remove('bg-light');
+        }
+      }
+
+      function updateCartView() {
+        const cartItemsContainer = document.getElementById('cart-items');
+        const cartTotalElement = document.getElementById('cart-total');
+        cartItemsContainer.innerHTML = '';
+
+        const ids = Object.keys(cart);
+        if (ids.length === 0) {
+          cartItemsContainer.innerHTML = '<li class="list-group-item text-muted text-center" id="cart-empty-msg">Keranjang masih kosong.</li>';
+        } else {
+          let total = 0;
+          ids.forEach(id => {
+            const item = cart[id];
+            total += item.price * item.quantity;
+
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center';
+            li.innerHTML = `
+              <div>
+                <div>${item.name}</div>
+                <small class="text-muted">Rp ${Number(item.price).toLocaleString('id-ID')} x ${item.quantity}</small>
+              </div>
+              <div>
+                <button class="btn btn-sm btn-outline-secondary me-1 decrease-qty" data-id="${item.id}">-</button>
+                <button class="btn btn-sm btn-outline-secondary increase-qty" data-id="${item.id}">+</button>
+                <button class="btn btn-sm btn-danger ms-2 remove-item" data-id="${item.id}">Hapus</button>
+              </div>
+            `;
+            cartItemsContainer.appendChild(li);
+          });
+          cartTotalElement.innerText = `Rp ${total.toLocaleString('id-ID')}`;
+        }
+
+        // pasang event untuk tombol + - hapus
+        attachCartButtons();
+      }
+
+      function attachCartButtons() {
+        document.querySelectorAll('.increase-qty').forEach(btn => {
+          btn.onclick = () => {
+            const id = btn.dataset.id;
+            const product = productsById[id];
+            if (product.stock <= 0) {
+              alert('Stok tidak cukup');
+              return;
             }
+            cart[id].quantity += 1;
+            product.stock -= 1;
+            updateProductCardUI(id);
             updateCartView();
-        }
-
-        function updateCartView() {
-            const cartItemsContainer = document.getElementById('cart-items');
-            const cartTotalElement = document.getElementById('cart-total');
-            cartItemsContainer.innerHTML = '';
-            let total = 0;
-            const productIds = Object.keys(cart);
-            if (productIds.length === 0) {
-                cartItemsContainer.innerHTML = '<li class="list-group-item text-muted text-center" id="cart-empty-msg">Keranjang masih kosong.</li>';
-            } else {
-                productIds.forEach(id => {
-                    const item = cart[id];
-                    total += item.price * item.quantity;
-                    const li = document.createElement('li');
-                    li.className = 'list-group-item d-flex justify-content-between align-items-center';
-                    li.innerHTML = `${item.name}<span class="badge bg-primary rounded-pill">${item.quantity} x ${item.price.toLocaleString('id-ID')}</span>`;
-                    cartItemsContainer.appendChild(li);
-                });
-            }
-            cartTotalElement.innerText = `Rp ${total.toLocaleString('id-ID')}`;
-        }
-
-        addToCartButtons.forEach(button => { button.addEventListener('click', () => { const productId = button.dataset.productId; addToCart(productId); }); });
-
-        const payButton = document.querySelector('[data-bs-target="#paymentModal"]');
-        const confirmPaymentButton = document.getElementById('confirm-payment-btn');
-        const modalTotalPriceElement = document.getElementById('modal-total-price');
-        const cashReceivedInput = document.getElementById('cash-received');
-
-        payButton.addEventListener('click', () => {
-            let total = 0;
-            Object.keys(cart).forEach(id => { total += cart[id].price * cart[id].quantity; });
-            modalTotalPriceElement.innerText = `Rp ${total.toLocaleString('id-ID')}`;
+          };
         });
-
-        confirmPaymentButton.addEventListener('click', () => {
-            const cartItems = Object.keys(cart);
-            if (cartItems.length === 0) { alert('Keranjang masih kosong!'); return; }
-            const cashReceived = parseFloat(cashReceivedInput.value);
-            if (!cashReceived || cashReceived <= 0) { alert('Masukkan jumlah uang tunai yang valid!'); return; }
-            let total = 0;
-            cartItems.forEach(id => { total += cart[id].price * cart[id].quantity; });
-            if (cashReceived < total) { alert('Jumlah uang tunai kurang dari total belanja!'); return; }
-
-            fetch('/process-transaction/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                body: JSON.stringify({ cart: cart, total: total, cash_received: cashReceived })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    cashReceivedInput.value = '';
-                    window.location.href = `/receipt/${data.transaction_id}/`;
-                } else { alert('Error: ' + data.message); }
-            })
-            .catch(error => { console.error('Error:', error); alert('Terjadi kesalahan saat memproses transaksi.'); });
+        document.querySelectorAll('.decrease-qty').forEach(btn => {
+          btn.onclick = () => {
+            const id = btn.dataset.id;
+            if (!cart[id]) return;
+            cart[id].quantity -= 1;
+            productsById[id].stock += 1;
+            if (cart[id].quantity <= 0) delete cart[id];
+            updateProductCardUI(id);
+            updateCartView();
+          };
         });
+        document.querySelectorAll('.remove-item').forEach(btn => {
+          btn.onclick = () => {
+            const id = btn.dataset.id;
+            if (!cart[id]) return;
+            // kembalikan stok sesuai quantity
+            productsById[id].stock += cart[id].quantity;
+            delete cart[id];
+            updateProductCardUI(id);
+            updateCartView();
+          };
+        });
+      }
 
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
+      // Payment modal logic
+      const payButton = document.getElementById('pay-button');
+      const modalTotal = document.getElementById('modal-total-price');
+      const cashInput = document.getElementById('cash-received');
+      const confirmPaymentBtn = document.getElementById('confirm-payment-btn');
+      const paymentChange = document.getElementById('payment-change');
+
+      // Tampilkan total saat modal dibuka
+      const paymentModalEl = document.getElementById('paymentModal');
+      paymentModalEl.addEventListener('show.bs.modal', () => {
+        const total = Object.values(cart).reduce((s, i) => s + i.price * i.quantity, 0);
+        modalTotal.innerText = `Rp ${total.toLocaleString('id-ID')}`;
+        paymentChange.innerHTML = '';
+        cashInput.value = '';
+      });
+
+      confirmPaymentBtn.addEventListener('click', () => {
+        const total = Object.values(cart).reduce((s, i) => s + i.price * i.quantity, 0);
+        if (total <= 0) {
+          alert('Keranjang kosong');
+          return;
         }
+        const cash = Number(cashInput.value || 0);
+        if (cash < total) {
+          alert('Uang tunai tidak cukup');
+          return;
+        }
+        const change = cash - total;
+        paymentChange.innerHTML = `<div class="alert alert-success">Kembalian: Rp ${change.toLocaleString('id-ID')}</div>`;
+
+        // Kirim transaksi ke server (contoh endpoint). Sertakan CSRF.
+        fetch('{% url "process_transaction" %}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken')
+          },
+          body: JSON.stringify({
+            cart: cart,
+            total: total,
+            cash: cash
+          })
+        })
+        .then(r => {
+          if (!r.ok) throw new Error('Network response was not ok');
+          return r.json();
+        })
+        .then(data => {
+          if (data.status === 'success') {
+            // Bisa redirect ke struk atau reset UI
+            window.location.href = data.receipt_url || '/';
+          } else {
+            alert(data.message || 'Gagal memproses transaksi');
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          alert('Kesalahan saat memproses transaksi');
+        });
+      });
+
+      // CSRF helper
+      function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+          const cookies = document.cookie.split(';');
+          for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+              cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+              break;
+            }
+          }
+        }
+        return cookieValue;
+      }
+
+      // Init on load
+      document.addEventListener('DOMContentLoaded', () => {
+        initAddToCartButtons();
+        // update semua card UI sesuai data dari server (jika ingin konsisten)
+        Object.keys(productsById).forEach(id => updateProductCardUI(id));
+        updateCartView();
+      });
     </script>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
